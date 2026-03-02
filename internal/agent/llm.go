@@ -59,11 +59,9 @@ type LLMClient struct {
 
 // NewLLMClient 创建 LLM 客户端
 func NewLLMClient(baseURL, apiKey, model string) *LLMClient {
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
 	return &LLMClient{
-		BaseURL: baseURL,
+		// 当 BaseURL 为空时，表示走“通用大模型”调用方式（在 Chat 中特殊处理）
+		BaseURL: strings.TrimSpace(baseURL),
 		APIKey:  apiKey,
 		Model:   model,
 		HTTP:    &http.Client{},
@@ -73,7 +71,57 @@ func NewLLMClient(baseURL, apiKey, model string) *LLMClient {
 // Chat 发送对话请求，返回助手消息（可能含 tool_calls）
 // 使用 client 的 BaseURL、APIKey；若需按规范使用 model_ip + Session-ID，请用 ChatWithSession。
 func (c *LLMClient) Chat(messages []ChatMessage, tools []ToolDef) (ChatMessage, error) {
+	// 当 BaseURL 为空时，走通用大模型调用方式（不依赖 /v1/chat/completions 规范中的 model_ip + Session-ID 约定）
+	if strings.TrimSpace(c.BaseURL) == "" {
+		return c.chatGeneric(messages, tools)
+	}
 	return c.ChatWithSession(c.BaseURL, "", messages, tools)
+}
+
+// chatGeneric 使用通用大模型调用方式：不依赖评测约定的 model_ip 与 Session-ID。
+// 这里默认走 OpenAI 官方 Chat Completions 接口，可按需扩展为其他厂商实现。
+func (c *LLMClient) chatGeneric(messages []ChatMessage, tools []ToolDef) (ChatMessage, error) {
+	reqBody := ChatRequest{
+		Model:      c.Model,
+		Messages:   messages,
+		Tools:      tools,
+		ToolChoice: "auto",
+	}
+	if len(tools) == 0 {
+		reqBody.ToolChoice = ""
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return ChatMessage{}, err
+	}
+
+	// 通用大模型默认使用 OpenAI 官方地址；如需接入其他厂商，可在此处扩展或做配置化。
+	url := "https://api.openai.com/v1/chat/completions"
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return ChatMessage{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return ChatMessage{}, err
+	}
+	defer resp.Body.Close()
+
+	var chatResp ChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		return ChatMessage{}, fmt.Errorf("解码响应失败: %w", err)
+	}
+	if chatResp.Error != nil {
+		return ChatMessage{}, fmt.Errorf("API 错误: %s", chatResp.Error.Message)
+	}
+	if len(chatResp.Choices) == 0 {
+		return ChatMessage{}, fmt.Errorf("无返回内容")
+	}
+	return chatResp.Choices[0].Message, nil
 }
 
 // ChatWithSession 按大赛规范：baseURL 为 http://{model_ip}:8888，请求头带 Session-ID（评测会话 ID）
