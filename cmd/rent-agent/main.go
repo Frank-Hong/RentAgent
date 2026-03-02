@@ -16,9 +16,6 @@ import (
 
 func main() {
 	cfg := config.LoadFromEnv()
-	if cfg.XUserID == "" {
-		panic("请设置环境变量 X_USER_ID（用户工号，与比赛平台注册一致）")
-	}
 
 	// 查询房源信息
 	client := api.NewClient(cfg.RentAPIBaseURL, cfg.XUserID)
@@ -27,7 +24,7 @@ func main() {
 
 	sessions := &sessionStore{byID: make(map[string][]agent.ChatMessage)}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/chat", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/chat", func(w http.ResponseWriter, r *http.Request) {
 		handleChat(w, r, ag, sessions)
 	})
 	addr := fmt.Sprintf(":%d", cfg.Port)

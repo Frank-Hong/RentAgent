@@ -24,6 +24,7 @@ type Config struct {
 func LoadFromEnv() *Config {
 	c := &Config{
 		RentAPIBaseURL: "http://7.221.6.201:8080",
+		XUserID:        "h00848321",
 		Port:           8191,
 		LLMBaseURL:     "https://api.openai.com/v1",
 		LLMModel:       "gpt-4o-mini",
